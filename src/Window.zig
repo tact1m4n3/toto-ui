@@ -3,11 +3,6 @@ const gl = @import("gl");
 
 const Window = @This();
 
-pub const Error = error{
-    GlfwInitError,
-    WindowCreateError,
-};
-
 pub const FramebufferSize = struct {
     width: u32,
     height: u32,
@@ -17,17 +12,17 @@ pub const getProcAddress = c.glfwGetProcAddress;
 
 inner: *c.struct_GLFWwindow,
 
-pub fn init() Error!Window {
-    if (c.glfwInit() == 0) {
-        return Error.GlfwInitError;
+pub fn init() !Window {
+    if (c.glfwInit() == c.GLFW_FALSE) {
+        return error.GlfwInitError;
     }
-    errdefer _ = c.glfwTerminate(); // idk about this
+    errdefer _ = c.glfwTerminate();
 
     c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MAJOR, gl.info.version_major);
     c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MINOR, gl.info.version_minor);
     c.glfwWindowHint(c.GLFW_OPENGL_CORE_PROFILE, @intFromBool(gl.info.profile == .core));
     const inner = c.glfwCreateWindow(640, 480, "My Title", null, null) orelse {
-        return Error.WindowCreateError;
+        return error.WindowCreateError;
     };
 
     c.glfwMakeContextCurrent(inner);
