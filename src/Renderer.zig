@@ -13,32 +13,55 @@ const max_quads = 2000;
 const max_vertices = max_quads * 4;
 const max_indices = max_quads * 6;
 
-const quad_positions = [_]zlm.Vec2{
-    .{ .x = -1.0, .y = -1.0 },
-    .{ .x = 1.0, .y = -1.0 },
+const quad_tex_coords = [_]zlm.Vec2{
+    .{ .x = 0.0, .y = 0.0 },
+    .{ .x = 1.0, .y = 0.0 },
     .{ .x = 1.0, .y = 1.0 },
-    .{ .x = -1.0, .y = 1.0 },
+    .{ .x = 0.0, .y = 1.0 },
 };
 
 const Vertex = extern struct {
     position: zlm.Vec2,
-    color: zlm.Vec4,
+    tex_coord: zlm.Vec2,
+    pixel_size: zlm.Vec2,
+    fill_color: zlm.Vec4,
+    border_color: zlm.Vec4,
+    border_radius: f32,
+    border_thickness: f32,
 };
 
 // TODO: maybe use quad_count instead of vertex_count and index_count, if we will render only quads
 
 allocator: Allocator,
-viewport_size: zlm.Vec2,
+screen_size: zlm.Vec2,
 vertices: []Vertex,
 vertex_count: usize,
 indices: []u32,
 index_count: usize,
 program: c_uint,
+screen_size_uniform: c_int,
 vao: c_uint,
 vbo: c_uint,
 ibo: c_uint,
 
-pub fn init(allocator: Allocator, viewport_size: zlm.Vec2) !Renderer {
+pub fn init(allocator: Allocator, screen_size: zlm.Vec2) !Renderer {
+    const vertices = try allocator.create([max_vertices]Vertex);
+    const indices = try allocator.create([max_indices]u32);
+
+    var i: usize = 0;
+    var offset: u32 = 0;
+    while (i < max_indices) : (i += 6) {
+        indices[i + 0] = offset + 0;
+        indices[i + 1] = offset + 1;
+        indices[i + 2] = offset + 2;
+
+        indices[i + 3] = offset + 2;
+        indices[i + 4] = offset + 3;
+        indices[i + 5] = offset + 0;
+
+        offset += 4;
+    }
+
     const program = create_program: {
         const vertex_shader_source = @embedFile(vertex_shader_path);
         const fragment_shader_source = @embedFile(fragment_shader_path);
@@ -100,22 +123,7 @@ pub fn init(allocator: Allocator, viewport_size: zlm.Vec2) !Renderer {
         break :create_program program;
     };
 
-    const vertices = try allocator.create([max_vertices]Vertex);
-    const indices = try allocator.create([max_indices]u32);
-
-    var i: usize = 0;
-    var offset: u32 = 0;
-    while (i < max_indices) : (i += 6) {
-        indices[i + 0] = offset + 0;
-        indices[i + 1] = offset + 1;
-        indices[i + 2] = offset + 2;
-
-        indices[i + 3] = offset + 2;
-        indices[i + 4] = offset + 3;
-        indices[i + 5] = offset + 0;
-
-        offset += 4;
-    }
+    const screen_size_uniform = gl.GetUniformLocation(program, "u_ScreenSize");
 
     var vao: c_uint = undefined;
     gl.GenVertexArrays(1, (&vao)[0..1]);
@@ -152,21 +160,75 @@ pub fn init(allocator: Allocator, viewport_size: zlm.Vec2) !Renderer {
                 @offsetOf(Vertex, "position"),
             );
 
-            const color_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_Color"));
-            gl.EnableVertexAttribArray(color_attrib);
+            const tex_coord_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_TexCoord"));
+            gl.EnableVertexAttribArray(tex_coord_attrib);
             gl.VertexAttribPointer(
-                color_attrib,
+                tex_coord_attrib,
+                2,
+                gl.FLOAT,
+                gl.FALSE,
+                @sizeOf(Vertex),
+                @offsetOf(Vertex, "tex_coord"),
+            );
+
+            const pixel_size_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_PixelSize"));
+            gl.EnableVertexAttribArray(pixel_size_attrib);
+            gl.VertexAttribPointer(
+                pixel_size_attrib,
+                2,
+                gl.FLOAT,
+                gl.FALSE,
+                @sizeOf(Vertex),
+                @offsetOf(Vertex, "pixel_size"),
+            );
+
+            const fill_color_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_FillColor"));
+            gl.EnableVertexAttribArray(fill_color_attrib);
+            gl.VertexAttribPointer(
+                fill_color_attrib,
                 4,
                 gl.FLOAT,
                 gl.FALSE,
                 @sizeOf(Vertex),
-                @offsetOf(Vertex, "color"),
+                @offsetOf(Vertex, "fill_color"),
+            );
+
+            const border_color_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_BorderColor"));
+            gl.EnableVertexAttribArray(border_color_attrib);
+            gl.VertexAttribPointer(
+                border_color_attrib,
+                4,
+                gl.FLOAT,
+                gl.FALSE,
+                @sizeOf(Vertex),
+                @offsetOf(Vertex, "border_color"),
+            );
+
+            const border_radius_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_BorderRadius"));
+            gl.EnableVertexAttribArray(border_radius_attrib);
+            gl.VertexAttribPointer(
+                border_radius_attrib,
+                1,
+                gl.FLOAT,
+                gl.FALSE,
+                @sizeOf(Vertex),
+                @offsetOf(Vertex, "border_radius"),
+            );
+
+            const border_thickness_attrib: c_uint = @intCast(gl.GetAttribLocation(program, "a_BorderThickness"));
+            gl.EnableVertexAttribArray(border_thickness_attrib);
+            gl.VertexAttribPointer(
+                border_thickness_attrib,
+                1,
+                gl.FLOAT,
+                gl.FALSE,
+                @sizeOf(Vertex),
+                @offsetOf(Vertex, "border_thickness"),
             );
         }
 
         {
             gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-
             gl.BufferData(
                 gl.ELEMENT_ARRAY_BUFFER,
                 @sizeOf(u32) * max_indices,
@@ -178,12 +240,13 @@ pub fn init(allocator: Allocator, viewport_size: zlm.Vec2) !Renderer {
 
     return .{
         .allocator = allocator,
-        .viewport_size = viewport_size,
+        .screen_size = screen_size,
         .vertices = vertices,
         .vertex_count = 0,
         .indices = indices,
         .index_count = 0,
         .program = program,
+        .screen_size_uniform = screen_size_uniform,
         .vao = vao,
         .vbo = vbo,
         .ibo = ibo,
@@ -199,19 +262,28 @@ pub fn deinit(renderer: *Renderer) void {
     gl.DeleteProgram(renderer.program);
 }
 
-pub fn render_quad(renderer: *Renderer, position: zlm.Vec2, size: zlm.Vec2, color: zlm.Vec4) void {
+pub fn render_quad(
+    renderer: *Renderer,
+    position: zlm.Vec2,
+    size: zlm.Vec2,
+    fill_color: zlm.Vec4,
+    border_color: zlm.Vec4,
+    border_radius: f32,
+    border_thickness: f32,
+) void {
     if (renderer.vertex_count + 4 > max_vertices) {
         renderer.flush();
     }
 
     for (0..4) |i| {
         renderer.vertices[renderer.vertex_count + i] = .{
-            .position = position
-                .add(size.mul(quad_positions[i]))
-                .div(renderer.viewport_size)
-                .sub(.{ .x = 0.5, .y = 0.5 })
-                .mul(.{ .x = 2.0, .y = 2.0 }),
-            .color = color,
+            .position = position.add(size.mul(quad_tex_coords[i])),
+            .tex_coord = quad_tex_coords[i],
+            .pixel_size = size,
+            .fill_color = fill_color,
+            .border_color = border_color,
+            .border_radius = border_radius,
+            .border_thickness = border_thickness,
         };
     }
 
@@ -238,6 +310,8 @@ pub fn flush(renderer: *Renderer) void {
 
     gl.UseProgram(renderer.program);
     defer gl.UseProgram(0);
+
+    gl.Uniform2f(renderer.screen_size_uniform, renderer.screen_size.x, renderer.screen_size.y);
 
     gl.BindVertexArray(renderer.vao);
     defer gl.BindVertexArray(0);

@@ -10,6 +10,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe.addCSourceFile(.{ .file = .{ .src_path = .{ .owner = b, .sub_path = "src/c/stb_truetype_impl.c" } } });
+    exe.addCSourceFile(.{ .file = .{ .src_path = .{ .owner = b, .sub_path = "src/c/stb_image_impl.c" } } });
+    exe.addCSourceFile(.{ .file = .{ .src_path = .{ .owner = b, .sub_path = "src/c/stb_image_write_impl.c" } } });
+    exe.addIncludePath(.{ .src_path = .{ .owner = b, .sub_path = "src/c" } });
+
     b.installArtifact(exe);
 
     const exe_unit_tests = b.addTest(.{
