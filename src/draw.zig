@@ -2,55 +2,70 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zlm = @import("zlm");
 
+const Ui = @import("Ui.zig");
+
+pub const UvRect = struct {
+    position: zlm.Vec2,
+    size: zlm.Vec2,
+
+    const full: UvRect = .{
+        .position = zlm.Vec2.zero,
+        .size = zlm.Vec2.one,
+    };
+};
+
 pub const Command = union(enum) {
     quad: Quad,
-    rect: Rect,
 };
 
 pub const Quad = struct {
     position: zlm.Vec2,
     size: zlm.Vec2,
-    color: zlm.Vec4,
-    tex_id: ?u32,
-};
-
-pub const Rect = struct {
-    position: zlm.Vec2,
-    size: zlm.Vec2,
-    fill_color: zlm.Vec4,
-    stroke_color: zlm.Vec4,
-    stroke_width: f32,
-    radius: f32,
+    color: zlm.Vec4 = zlm.Vec4.one,
+    texture: ?usize = null,
+    uv_rect: UvRect = UvRect.full,
 };
 
 pub const Vertex = extern struct {
     position: zlm.Vec2,
     color: zlm.Vec4,
-    tex_coord: u32,
-    tex_idx: u32,
+    tex_coord: zlm.Vec2,
+    tex_index: f32,
 };
 
-pub const VertexBuffer = std.ArrayList(Vertex);
-pub const IndexBuffer = std.ArrayList(u32);
+const max_textures = 64;
+
+const VertexBuffer = std.ArrayList(Vertex);
+const IndexBuffer = std.ArrayList(u32);
+const TextureArray = std.BoundedArray(usize, max_textures);
 
 pub const RenderPass = struct {
-    vertices: *VertexBuffer,
-    indices: *IndexBuffer,
-    tex_ids: [16]u32, // TODO: shouldn't be hardcoded
-    tex_count: usize,
+    const default_tex_index = 0;
 
-    pub fn init(allocator: Allocator, white_tex_id: u32, font_tex_id: u32) RenderPass {
-        const vertex_buffer = VertexBuffer.init(allocator);
-        const index_buffer = IndexBuffer.init(allocator);
+    vertices: VertexBuffer,
+    indices: IndexBuffer,
+    textures: TextureArray,
+
+    pub fn init(allocator: Allocator, default_texture: usize) RenderPass {
+        const vertices = VertexBuffer.init(allocator);
+        const indices = IndexBuffer.init(allocator);
+
+        var textures = TextureArray.init(0) catch unreachable; // TODO: configurable at runtime
+        textures.append(default_texture) catch unreachable;
+
         return .{
-            .vertex_buffer = vertex_buffer,
-            .index_buffer = index_buffer,
-            .texture_ids = [_]u32{ white_tex_id, font_tex_id },
-            .texture_count = 2,
+            .vertices = vertices,
+            .indices = indices,
+            .textures = textures,
         };
     }
 
-    pub fn submit(render_pass: *RenderPass, command: Command) !bool {
+    pub fn deinit(render_pass: *RenderPass) void {
+        render_pass.vertices.deinit();
+        render_pass.indices.deinit();
+    }
+
+    pub fn submit(render_pass: *RenderPass, command: Command) !void {
         const quad_tex_coords = [_]zlm.Vec2{
             .{ .x = 0.0, .y = 0.0 },
             .{ .x = 1.0, .y = 0.0 },
@@ -58,41 +73,38 @@ pub const RenderPass = struct {
             .{ .x = 0.0, .y = 1.0 },
         };
 
-        const offset = render_pass.vertices.items.len;
+        const quad_indices = [_]u32{ 0, 1, 2, 2, 3, 0 };
+
+        const offset: u32 = @intCast(render_pass.vertices.items.len);
 
         switch (command) {
             .quad => |quad| {
-                const tex_idx = if (quad.tex_id) |tex_id| {
-                    if (render_pass.tex_count >= 16) {
-                        return false;
+                const tex_index = if (quad.texture) |texture|
+                    for (render_pass.textures.buffer, 0..render_pass.textures.len) |current, i| {
+                        if (current == texture) {
+                            break i;
+                        }
+                    } else ret: {
+                        const i = render_pass.textures.len;
+                        try render_pass.textures.append(texture);
+                        break :ret i;
                     }
-                    const tex_idx = render_pass.tex_count;
-                    render_pass.tex_ids[tex_idx] = tex_id;
-                    render_pass.tex_count += 1;
-                    tex_idx;
-                } else {
-                    0;
-                };
+                else
+                    default_tex_index;
 
                 inline for (quad_tex_coords) |tex_coord| {
-                    render_pass.vertices.append(.{
+                    try render_pass.vertices.append(.{
                         .position = quad.position.add(quad.size.mul(tex_coord)),
                         .color = quad.color,
-                        .tex_coord = tex_coord,
-                        .tex_idx = tex_idx,
+                        .tex_coord = quad.uv_rect.position.add(quad.uv_rect.size.mul(tex_coord)),
+                        .tex_index = @floatFromInt(tex_index),
                     });
                 }
 
-                render_pass.indices.append(offset + 0);
-                render_pass.indices.append(offset + 1);
-                render_pass.indices.append(offset + 2);
-                render_pass.indices.append(offset + 2);
-                render_pass.indices.append(offset + 3);
-                render_pass.indices.append(offset + 0);
+                inline for (quad_indices) |index| {
+                    try render_pass.indices.append(offset + index);
+                }
             },
-            // .rect => |rect| {},
         }
-
-        return true;
     }
 };
